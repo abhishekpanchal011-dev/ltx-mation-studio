@@ -1,1 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="LTX Motion" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+  <title>LTX Motion Studio</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">LX</div>
+        <div>
+          <div class="brand-name">LTX Motion</div>
+          <div class="brand-sub">Studio</div>
+        </div>
+      </div>
 
+      <nav class="nav">
+        <button class="nav-item active" data-view="create"><span>✦</span> Create</button>
+        <button class="nav-item" data-view="history"><span>◴</span> History</button>
+        <button class="nav-item" data-view="projects"><span>▦</span> Projects</button>
+      </nav>
+
+      <div class="sidebar-spacer"></div>
+      <div class="budget-card">
+        <div class="budget-top"><span>Monthly compute</span><strong id="budgetUsed">$0.00</strong></div>
+        <div class="budget-track"><div id="budgetBar" class="budget-fill"></div></div>
+        <div class="budget-foot"><span>$30 free credit</span><span>$32 cap</span></div>
+      </div>
+      <div class="sidebar-note">L40S 48 GB · LTX‑2.5 distilled</div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <h1>Create video</h1>
+          <p>Generate consistent 720p clips with LTX‑2.5.</p>
+        </div>
+        <div class="topbar-actions"><button id="installBtn" class="install-button hidden" type="button">Install app</button><div class="status-pill"><span class="dot"></span><span id="backendStatus">Checking backend</span></div></div>
+      </header>
+
+      <section id="createView" class="view active-view">
+        <div class="mode-tabs">
+          <button class="mode-tab active" data-mode="image">Image to Video</button>
+          <button class="mode-tab" data-mode="text">Text to Video</button>
+        </div>
+
+        <div class="workspace-grid">
+          <section class="composer card">
+            <div id="imagePanel" class="field-block">
+              <div class="field-head">
+                <label>First frame</label>
+                <span class="hint">PNG, JPG or WebP · max 20 MB</span>
+              </div>
+              <label id="dropZone" class="drop-zone">
+                <input id="imageInput" type="file" accept="image/png,image/jpeg,image/webp" hidden />
+                <input id="cameraInput" type="file" accept="image/*" capture="environment" hidden />
+                <div id="dropEmpty" class="drop-empty">
+                  <div class="upload-icon">＋</div>
+                  <strong>Add a first frame</strong>
+                  <span>Choose from gallery, files, or camera</span>
+                  <div class="mobile-upload-actions"><button id="galleryBtn" type="button">Gallery</button><button id="cameraBtn" type="button">Camera</button></div>
+                </div>
+                <img id="imagePreview" class="image-preview" alt="Preview" />
+                <button id="removeImage" type="button" class="remove-image">×</button>
+              </label>
+            </div>
+
+            <div class="field-block">
+              <div class="field-head">
+                <label for="prompt">Describe the video</label>
+                <button id="promptExample" class="text-button" type="button">Use example</button>
+              </div>
+              <textarea id="prompt" maxlength="6000" placeholder="Describe the subject, action, environment, lighting, camera movement and sound..."></textarea>
+              <div class="prompt-tools">
+                <label class="toggle-line">
+                  <input id="promptEnhance" type="checkbox" checked />
+                  <span class="switch"></span>
+                  <span>Prompt enhance</span>
+                </label>
+                <span id="charCount">0 / 6000</span>
+              </div>
+            </div>
+
+            <div class="settings-grid">
+              <div class="setting">
+                <label>Duration</label>
+                <div class="segmented" id="durationControl">
+                  <button data-value="5">5s</button>
+                  <button data-value="10" class="active">10s</button>
+                  <button data-value="20">20s</button>
+                  <button data-value="30">30s</button>
+                  <button data-value="60">60s</button>
+                </div>
+                <small id="durationHint">Native 10-second generation</small>
+              </div>
+
+              <div class="setting">
+                <label>Aspect ratio</label>
+                <div class="segmented compact" id="aspectControl">
+                  <button data-value="16:9" class="active">▭ 16:9</button>
+                  <button data-value="9:16">▯ 9:16</button>
+                </div>
+                <small>Exact 1280×720 or 720×1280 output</small>
+              </div>
+
+              <div class="setting">
+                <label for="cameraMotion">Camera motion</label>
+                <select id="cameraMotion">
+                  <option value="auto">Auto / prompt controlled</option>
+                  <option value="static">Static</option>
+                  <option value="dolly_in">Dolly in</option>
+                  <option value="dolly_out">Dolly out</option>
+                  <option value="pan_left">Pan left</option>
+                  <option value="pan_right">Pan right</option>
+                  <option value="orbit_left">Orbit left</option>
+                  <option value="orbit_right">Orbit right</option>
+                  <option value="crane_up">Crane up</option>
+                  <option value="handheld">Subtle handheld</option>
+                </select>
+              </div>
+
+              <div class="setting">
+                <label>Audio</label>
+                <label class="audio-box">
+                  <input id="audioToggle" type="checkbox" checked />
+                  <span class="switch"></span>
+                  <div><strong>Generate synchronized audio</strong><small>LTX audio VAE</small></div>
+                </label>
+              </div>
+
+              <div class="setting">
+                <label>Seed</label>
+                <div class="seed-row">
+                  <input id="seed" type="number" value="-1" min="-1" max="2147483647" />
+                  <button id="randomSeed" type="button" class="icon-button">↻</button>
+                </div>
+                <small>-1 generates a new random seed</small>
+              </div>
+
+              <div class="setting disabled-setting">
+                <label>Enhance to 4K</label>
+                <div class="disabled-row"><span>Phase 2</span><strong>Off</strong></div>
+                <small>Kept disabled to protect the $32 monthly cap.</small>
+              </div>
+            </div>
+
+            <div class="generate-row desktop-generate-row">
+              <div>
+                <div class="estimate-label">Estimated compute</div>
+                <div id="costEstimate" class="estimate-value">~$0.20 · ~6 min</div>
+              </div>
+              <button id="generateBtn" class="generate-button" type="button"><span>✦</span> Generate video</button>
+            </div>
+          </section>
+
+          <aside class="preview card">
+            <div class="preview-head">
+              <div>
+                <span class="eyebrow">Output</span>
+                <h2>Generation preview</h2>
+              </div>
+              <span id="outputBadge" class="output-badge">720p · 24 fps</span>
+            </div>
+
+            <div id="emptyOutput" class="empty-output">
+              <div class="film-icon">▶</div>
+              <strong>Your video will appear here</strong>
+              <span>Start with a 10-second clip. Longer durations are generated as continuity-preserving segments and stitched automatically.</span>
+            </div>
+
+            <div id="progressOutput" class="progress-output hidden">
+              <div class="progress-orb"><span></span></div>
+              <strong id="progressTitle">Preparing LTX‑2.5</strong>
+              <span id="progressText">Allocating an L40S worker…</span>
+              <div class="progress-track"><div id="progressBar" class="progress-fill"></div></div>
+              <div class="progress-meta"><span id="elapsedText">0:00 elapsed</span><span id="remainingText">~6:00 remaining</span></div>
+              <button id="cancelBtn" class="secondary-button" type="button">Cancel</button>
+            </div>
+
+            <div id="videoOutput" class="video-output hidden">
+              <video id="resultVideo" controls playsinline></video>
+              <div class="video-meta">
+                <div><span>Duration</span><strong id="metaDuration">—</strong></div>
+                <div><span>Seed</span><strong id="metaSeed">—</strong></div>
+                <div><span>Render</span><strong id="metaRender">—</strong></div>
+              </div>
+              <div class="video-actions">
+                <a id="downloadBtn" class="generate-button small" download>↓ Download MP4</a>
+                <button id="newVideoBtn" class="secondary-button" type="button">Create another</button>
+              </div>
+            </div>
+
+            <div class="pipeline-info">
+              <div class="pipeline-step"><span>1</span><div><strong>Distilled LTX‑2.5</strong><small>INT8 transformer + Gemma 4</small></div></div>
+              <div class="pipe-line"></div>
+              <div class="pipeline-step"><span>2</span><div><strong>Two-stage render</strong><small>Latent upscale + refinement</small></div></div>
+              <div class="pipe-line"></div>
+              <div class="pipeline-step"><span>3</span><div><strong>Exact 720p</strong><small>Crop, encode & stitch automatically</small></div></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="historyView" class="view">
+        <div class="section-card card">
+          <div class="section-title"><div><h2>Generation history</h2><p>Stored only in this browser. Video files remain on the server for up to 24 hours.</p></div><button id="clearHistory" class="secondary-button">Clear history</button></div>
+          <div id="historyList" class="history-list"></div>
+        </div>
+      </section>
+
+      <section id="projectsView" class="view">
+        <div class="section-card card coming-soon">
+          <div class="coming-icon">▦</div>
+          <h2>Projects are next</h2>
+          <p>The current build is intentionally generation-first. Project timelines, reusable characters, shot lists and 4K mastering will sit on top of the same backend later.</p>
+        </div>
+      </section>
+    </main>
+
+    <nav class="mobile-nav" aria-label="Primary navigation">
+      <button class="mobile-nav-item active" data-view="create"><span>✦</span><small>Create</small></button>
+      <button class="mobile-nav-item" data-view="history"><span>◴</span><small>History</small></button>
+      <button class="mobile-nav-item" data-view="projects"><span>▦</span><small>Projects</small></button>
+    </nav>
+
+    <div class="mobile-generate-dock">
+      <div><small id="mobileEstimateLabel">10s · ~6 min</small><strong id="mobileCostEstimate">~$0.20</strong></div>
+      <button id="mobileGenerateBtn" class="generate-button" type="button"><span>✦</span> Generate</button>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
