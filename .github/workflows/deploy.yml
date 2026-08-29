@@ -2,9 +2,6 @@ name: Deploy LTX Motion Studio to Modal
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
 
 jobs:
   deploy:
@@ -20,9 +17,11 @@ jobs:
           python-version: "3.12"
 
       - name: Install deployment dependencies
-        run: python -m pip install modal fastapi python-multipart
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install "modal>=1.5,<2" fastapi python-multipart
 
-      - name: Deploy to Modal
+      - name: Deploy LTX Motion Studio
         env:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
