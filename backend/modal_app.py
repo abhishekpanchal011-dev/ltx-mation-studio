@@ -707,7 +707,11 @@ def delete_result(job_id: str) -> dict[str, str]:
     return {"status": "deleted"}
 
 
-web.mount("/", StaticFiles(directory="/web", html=True), name="web")
+web.mount(
+    "/",
+    StaticFiles(directory="/web", html=True, check_dir=False),
+    name="web",
+)
 
 
 @app.function(image=web_image, volumes={RESULT_DIR: result_volume}, timeout=300)
