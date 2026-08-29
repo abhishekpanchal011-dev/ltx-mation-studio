@@ -19,8 +19,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Modal
-        run: python -m pip install modal
+      - name: Install deployment dependencies
+        run: python -m pip install modal fastapi python-multipart
 
       - name: Deploy to Modal
         env:
