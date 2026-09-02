@@ -392,6 +392,7 @@ def _prepare_workflow(
         ("width", width),
         ("height", height),
         ("seed", int(seed)),
+        ("temperature", 1.0),
         ("frame_rate", 24),
         ("unet_name", MODEL_NAMES["unet"]),
         ("video_vae", MODEL_NAMES["video_vae"]),
