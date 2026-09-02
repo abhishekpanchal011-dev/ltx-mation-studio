@@ -391,7 +391,7 @@ def _prepare_workflow(
         ("duration", int(duration)),
         ("width", width),
         ("height", height),
-        ("seed", int(seed)),
+        ("noise_seed", int(seed)),
         ("temperature", 1.0),
         ("frame_rate", 24),
         ("unet_name", MODEL_NAMES["unet"]),
