@@ -46,7 +46,7 @@
           <h1>Create video</h1>
           <p>Generate consistent 720p clips with LTX‑2.5.</p>
         </div>
-        <div class="topbar-actions"><button id="installBtn" class="install-button hidden" type="button">Install app</button><div class="status-pill"><span class="dot"></span><span id="backendStatus">Checking backend</span></div></div>
+        <div class="topbar-actions"><button id="installBtn" class="install-button hidden" type="button">Install app</button><div class="status-pill"><span class="dot"></span><span id="backendStatus">Ready</span></div></div>
       </header>
 
       <section id="createView" class="view active-view">
@@ -142,7 +142,7 @@
               <div class="setting">
                 <label>Seed</label>
                 <div class="seed-row">
-                  <input id="seed" type="number" value="-1" min="-1" max="2147483647" />
+                  <input id="seed" type="number" value="0.7" min="-1" max="2147483647" />
                   <button id="randomSeed" type="button" class="icon-button">↻</button>
                 </div>
                 <small>-1 generates a new random seed</small>
@@ -214,7 +214,7 @@
 
       <section id="historyView" class="view">
         <div class="section-card card">
-          <div class="section-title"><div><h2>Generation history</h2><p>Stored only in this browser. Video files remain on the server for up to 24 hours.</p></div><button id="clearHistory" class="secondary-button">Clear history</button></div>
+          <div class="section-title"><div><h2>Generation history</h2><p>Stored only in this browser. Video files remain on the server for up to 24 hours.</p></div><button id="clearHistory" class="text-button" type="button">Clear</button></div>
           <div id="historyList" class="history-list"></div>
         </div>
       </section>
