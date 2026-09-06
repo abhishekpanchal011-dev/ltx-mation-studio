@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 import modal
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 
 APP_NAME = "ltx-motion-studio"
@@ -21,8 +24,8 @@ WORKFLOW_DIR = Path("/opt/workflows")
 RESULT_DIR = Path("/results")
 COMFY_URL = "http://127.0.0.1:8188"
 
-# Pin the workflow templates so a future upstream change
-# cannot silently break this deployment.
+COMFYUI_VERSION = "v0.34.0"
+
 WORKFLOW_TEMPLATE_COMMIT = (
     "db9d5859d09c21a2d4101a1c18f64fc2f70e4fa4"
 )
@@ -181,12 +184,15 @@ gpu_image = (
     .run_commands(
         (
             "git clone --depth 1 "
-            "--branch v0.34.0 "
+            f"--branch {COMFYUI_VERSION} "
             "https://github.com/"
             "Comfy-Org/ComfyUI.git "
             "/opt/ComfyUI"
         ),
-        "python -m pip install --upgrade pip",
+        (
+            "python -m pip install "
+            "--upgrade pip"
+        ),
         (
             "python -m pip install "
             "--index-url "
@@ -249,6 +255,7 @@ web_image = (
     .pip_install(
         "fastapi[standard]",
         "python-multipart",
+        "requests",
     )
     .add_local_dir(
         "web",
@@ -275,20 +282,27 @@ def _wait_for_comfy(
         time.time() + timeout_seconds
     )
 
-    last_error: Exception | None = None
+    last_error: str | None = None
 
     while time.time() < deadline:
         try:
             response = requests.get(
                 f"{COMFY_URL}/system_stats",
-                timeout=3,
+                timeout=(3, 10),
             )
 
             if response.ok:
                 return
 
-        except Exception as exc:
-            last_error = exc
+            last_error = (
+                f"HTTP {response.status_code}: "
+                f"{response.text[:500]}"
+            )
+
+        except requests.RequestException as exc:
+            last_error = (
+                f"{type(exc).__name__}: {exc}"
+            )
 
         time.sleep(2)
 
@@ -327,12 +341,15 @@ def _find_main_subgraph(
             f"{expected_name}"
         )
 
-    subgraph_id = subgraph_def["id"]
+    subgraph_id = (
+        subgraph_def["id"]
+    )
 
     outer_node = next(
         (
             node
-            for node in workflow.get(
+            for node
+            in workflow.get(
                 "nodes",
                 [],
             )
@@ -348,7 +365,10 @@ def _find_main_subgraph(
             f"subgraph: {expected_name}"
         )
 
-    return outer_node, subgraph_def
+    return (
+        outer_node,
+        subgraph_def,
+    )
 
 
 def _widget_index_map(
@@ -398,7 +418,8 @@ def _disconnect_link(
 
     workflow["links"] = [
         link
-        for link in workflow.get(
+        for link
+        in workflow.get(
             "links",
             [],
         )
@@ -410,20 +431,34 @@ def _disconnect_link(
         [],
     ):
         for inp in (
-            node.get("inputs", [])
+            node.get(
+                "inputs",
+                [],
+            )
             or []
         ):
-            if inp.get("link") == link_id:
+            if (
+                inp.get("link")
+                == link_id
+            ):
                 inp["link"] = None
 
         for out in (
-            node.get("outputs", [])
+            node.get(
+                "outputs",
+                [],
+            )
             or []
         ):
-            links = out.get("links")
+            links = out.get(
+                "links"
+            )
 
             if (
-                isinstance(links, list)
+                isinstance(
+                    links,
+                    list,
+                )
                 and link_id in links
             ):
                 out["links"] = [
@@ -440,19 +475,25 @@ def _set_outer_value(
     label: str,
     value: Any,
 ) -> None:
-    index_map = _widget_index_map(
-        subgraph_def
+    index_map = (
+        _widget_index_map(
+            subgraph_def
+        )
     )
 
     if label not in index_map:
         raise RuntimeError(
             "Template parameter missing: "
-            f"{label}. Available parameters: "
+            f"{label}. "
+            "Available parameters: "
             f"{sorted(index_map.keys())}"
         )
 
     for inp in (
-        outer_node.get("inputs", [])
+        outer_node.get(
+            "inputs",
+            [],
+        )
         or []
     ):
         input_label = (
@@ -496,26 +537,33 @@ def _patch_save_prefix(
     ):
         if (
             node.get("type")
-            == "SaveVideo"
+            != "SaveVideo"
         ):
-            values = node.setdefault(
-                "widgets_values",
-                [],
-            )
+            continue
 
-            if values:
-                values[0] = prefix
-            else:
-                node["widgets_values"] = [
-                    prefix,
-                    "auto",
-                    "auto",
-                ]
+        values = node.setdefault(
+            "widgets_values",
+            [],
+        )
+
+        if values:
+            values[0] = prefix
+        else:
+            node[
+                "widgets_values"
+            ] = [
+                prefix,
+                "auto",
+                "auto",
+            ]
 
 
 def _prepare_workflow(
     *,
-    mode: Literal["image", "text"],
+    mode: Literal[
+        "image",
+        "text",
+    ],
     prompt: str,
     prompt_enhance: bool,
     duration: int,
@@ -527,10 +575,12 @@ def _prepare_workflow(
     input_filename: str | None,
     output_prefix: str,
 ) -> dict[str, Any]:
+
     if mode == "image":
         template_name = (
             "video_ltx2_5_i2v.json"
         )
+
         expected_name = (
             "Image to Video (LTX-2.5)"
         )
@@ -539,28 +589,29 @@ def _prepare_workflow(
         template_name = (
             "video_ltx2_5_t2v.json"
         )
+
         expected_name = (
             "Text to Video (LTX-2.5)"
         )
 
     workflow_path = (
-        WORKFLOW_DIR / template_name
+        WORKFLOW_DIR
+        / template_name
     )
 
     if not workflow_path.exists():
         raise RuntimeError(
-            "Workflow template not found: "
+            "Workflow template "
+            "not found: "
             f"{workflow_path}"
         )
 
-    workflow = json.loads(
-        workflow_path.read_text(
-            encoding="utf-8",
-        )
-    )
-
     workflow = copy.deepcopy(
-        workflow
+        json.loads(
+            workflow_path.read_text(
+                encoding="utf-8"
+            )
+        )
     )
 
     outer, definition = (
@@ -571,53 +622,84 @@ def _prepare_workflow(
     )
 
     width, height = (
-        GEN_DIMS[aspect_ratio]
+        GEN_DIMS[
+            aspect_ratio
+        ]
     )
 
     settings = (
-        ("prompt", prompt),
+        (
+            "prompt",
+            prompt,
+        ),
         (
             "prompt_enhance",
-            bool(prompt_enhance),
+            bool(
+                prompt_enhance
+            ),
         ),
         (
             "duration",
             int(duration),
         ),
-        ("width", width),
-        ("height", height),
+        (
+            "width",
+            width,
+        ),
+        (
+            "height",
+            height,
+        ),
         (
             "noise_seed",
             int(seed),
         ),
-        ("frame_rate", 24),
+        (
+            "frame_rate",
+            24,
+        ),
         (
             "unet_name",
-            MODEL_NAMES["unet"],
+            MODEL_NAMES[
+                "unet"
+            ],
         ),
         (
             "video_vae",
-            MODEL_NAMES["video_vae"],
+            MODEL_NAMES[
+                "video_vae"
+            ],
         ),
         (
             "audio_vae",
-            MODEL_NAMES["audio_vae"],
+            MODEL_NAMES[
+                "audio_vae"
+            ],
         ),
         (
             "clip_name",
-            MODEL_NAMES["clip"],
+            MODEL_NAMES[
+                "clip"
+            ],
         ),
         (
             "upscale_model",
-            MODEL_NAMES["upscaler"],
+            MODEL_NAMES[
+                "upscaler"
+            ],
         ),
         (
             "prompt_enhance_model",
-            MODEL_NAMES["enhancer"],
+            MODEL_NAMES[
+                "enhancer"
+            ],
         ),
     )
 
-    for label, value in settings:
+    for (
+        label,
+        value,
+    ) in settings:
         _set_outer_value(
             workflow,
             outer,
@@ -629,8 +711,9 @@ def _prepare_workflow(
     if mode == "image":
         if not input_filename:
             raise ValueError(
-                "Image-to-video requires "
-                "an input image"
+                "Image-to-video "
+                "requires an "
+                "input image"
             )
 
         load_node = next(
@@ -642,13 +725,17 @@ def _prepare_workflow(
                     [],
                 )
                 if (
-                    node.get("type")
+                    node.get(
+                        "type"
+                    )
                     == "LoadImage"
-                    and "First Frame"
-                    in str(
-                        node.get(
-                            "title",
-                            "",
+                    and (
+                        "First Frame"
+                        in str(
+                            node.get(
+                                "title",
+                                "",
+                            )
                         )
                     )
                 )
@@ -658,22 +745,25 @@ def _prepare_workflow(
 
         if not load_node:
             raise RuntimeError(
-                "Load First Frame node "
-                "was not found in the "
-                "I2V template"
+                "Load First Frame "
+                "node was not found "
+                "in the I2V template"
             )
 
-        values = load_node.setdefault(
-            "widgets_values",
-            [],
+        values = (
+            load_node
+            .setdefault(
+                "widgets_values",
+                [],
+            )
         )
 
-        if not values:
-            values.append(
+        if values:
+            values[0] = (
                 input_filename
             )
         else:
-            values[0] = (
+            values.append(
                 input_filename
             )
 
@@ -691,19 +781,32 @@ def _convert_and_execute(
 ) -> None:
     import requests
 
-    converted = requests.post(
-        (
-            f"{COMFY_URL}/"
-            "workflow/convert"
-        ),
-        json=workflow,
-        timeout=60,
-    )
+    try:
+        converted = (
+            requests.post(
+                (
+                    f"{COMFY_URL}/"
+                    "workflow/convert"
+                ),
+                json=workflow,
+                timeout=(10, 120),
+            )
+        )
+
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            "ComfyUI workflow "
+            "conversion request "
+            "failed: "
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        ) from None
 
     if not converted.ok:
         raise RuntimeError(
-            "ComfyUI workflow conversion "
-            f"failed ({converted.status_code}): "
+            "ComfyUI workflow "
+            "conversion failed "
+            f"({converted.status_code}): "
             f"{converted.text}"
         )
 
@@ -711,46 +814,68 @@ def _convert_and_execute(
         api_workflow = (
             converted.json()
         )
+
     except Exception as exc:
         raise RuntimeError(
-            "ComfyUI workflow converter "
-            "returned invalid JSON: "
+            "ComfyUI workflow "
+            "converter returned "
+            "invalid JSON: "
             f"{converted.text}"
         ) from exc
 
-    queued = requests.post(
-        f"{COMFY_URL}/prompt",
-        json={
-            "prompt": api_workflow,
-        },
-        timeout=30,
-    )
+    try:
+        queued = (
+            requests.post(
+                f"{COMFY_URL}/prompt",
+                json={
+                    "prompt":
+                    api_workflow
+                },
+                timeout=(10, 120),
+            )
+        )
+
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            "ComfyUI queue request "
+            "failed: "
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        ) from None
 
     if not queued.ok:
         raise RuntimeError(
-            "ComfyUI rejected workflow "
+            "ComfyUI rejected "
+            "workflow "
             f"({queued.status_code}): "
             f"{queued.text}"
         )
 
     try:
-        payload = queued.json()
+        payload = (
+            queued.json()
+        )
+
     except Exception as exc:
         raise RuntimeError(
-            "ComfyUI returned invalid "
-            "queue response: "
+            "ComfyUI returned "
+            "invalid queue response: "
             f"{queued.text}"
         ) from exc
 
-    if payload.get("node_errors"):
+    if payload.get(
+        "node_errors"
+    ):
         raise RuntimeError(
             "ComfyUI workflow "
             "validation failed: "
             f"{payload['node_errors']}"
         )
 
-    prompt_id = payload.get(
-        "prompt_id"
+    prompt_id = (
+        payload.get(
+            "prompt_id"
+        )
     )
 
     if not prompt_id:
@@ -765,26 +890,58 @@ def _convert_and_execute(
         + timeout_seconds
     )
 
-    while time.time() < deadline:
-        history_response = (
-            requests.get(
-                (
-                    f"{COMFY_URL}/history/"
-                    f"{prompt_id}"
-                ),
-                timeout=15,
+    last_poll_error: (
+        str | None
+    ) = None
+
+    while (
+        time.time()
+        < deadline
+    ):
+        try:
+            history_response = (
+                requests.get(
+                    (
+                        f"{COMFY_URL}/"
+                        "history/"
+                        f"{prompt_id}"
+                    ),
+                    timeout=(5, 60),
+                )
             )
-        )
+
+        except requests.RequestException as exc:
+            last_poll_error = (
+                f"{type(exc).__name__}: "
+                f"{exc}"
+            )
+
+            time.sleep(3)
+            continue
 
         if not history_response.ok:
+            last_poll_error = (
+                "HTTP "
+                f"{history_response.status_code}: "
+                f"{history_response.text[:1000]}"
+            )
+
             time.sleep(3)
             continue
 
         try:
             history = (
-                history_response.json()
+                history_response
+                .json()
             )
-        except Exception:
+
+        except Exception as exc:
+            last_poll_error = (
+                "Invalid history JSON: "
+                f"{type(exc).__name__}: "
+                f"{exc}"
+            )
+
             time.sleep(3)
             continue
 
@@ -798,9 +955,11 @@ def _convert_and_execute(
                 {},
             )
 
-            messages = status.get(
-                "messages",
-                [],
+            messages = (
+                status.get(
+                    "messages",
+                    [],
+                )
             )
 
             for message in messages:
@@ -810,18 +969,24 @@ def _convert_and_execute(
                         list,
                     )
                     and message
-                    and message[0]
-                    == "execution_error"
+                    and (
+                        message[0]
+                        == "execution_error"
+                    )
                 ):
                     details = (
                         message[1]
-                        if len(message) > 1
+                        if (
+                            len(message)
+                            > 1
+                        )
                         else message
                     )
 
                     raise RuntimeError(
                         "ComfyUI execution "
-                        f"error: {details}"
+                        "error: "
+                        f"{details}"
                     )
 
             if status.get(
@@ -831,9 +996,21 @@ def _convert_and_execute(
 
         time.sleep(3)
 
+    suffix = (
+        (
+            " Last polling "
+            "error: "
+            f"{last_poll_error}"
+        )
+        if last_poll_error
+        else ""
+    )
+
     raise TimeoutError(
-        "ComfyUI generation exceeded "
-        f"{timeout_seconds}s"
+        "ComfyUI generation "
+        "exceeded "
+        f"{timeout_seconds}s."
+        f"{suffix}"
     )
 
 
@@ -842,28 +1019,34 @@ def _newest_video(
     prefix_token: str,
 ) -> Path:
     output_dir = (
-        COMFY_DIR / "output"
+        COMFY_DIR
+        / "output"
     )
 
     candidates = [
         path
-        for path in output_dir.rglob(
+        for path
+        in output_dir.rglob(
             "*"
         )
         if (
             path.is_file()
-            and path.suffix.lower()
-            in {
-                ".mp4",
-                ".webm",
-                ".mov",
-            }
+            and (
+                path.suffix.lower()
+                in {
+                    ".mp4",
+                    ".webm",
+                    ".mov",
+                }
+            )
             and (
                 path.stat().st_mtime
                 >= after_ts
             )
-            and prefix_token
-            in str(path)
+            and (
+                prefix_token
+                in str(path)
+            )
         )
     ]
 
@@ -871,15 +1054,19 @@ def _newest_video(
         candidates = [
             path
             for path
-            in output_dir.rglob("*")
+            in output_dir.rglob(
+                "*"
+            )
             if (
                 path.is_file()
-                and path.suffix.lower()
-                in {
-                    ".mp4",
-                    ".webm",
-                    ".mov",
-                }
+                and (
+                    path.suffix.lower()
+                    in {
+                        ".mp4",
+                        ".webm",
+                        ".mov",
+                    }
+                )
                 and (
                     path.stat().st_mtime
                     >= after_ts
@@ -889,8 +1076,9 @@ def _newest_video(
 
     if not candidates:
         raise RuntimeError(
-            "ComfyUI completed but no "
-            "output video was found"
+            "ComfyUI completed "
+            "but no output video "
+            "was found"
         )
 
     return max(
@@ -908,7 +1096,9 @@ def _exact_720p(
     audio: bool,
 ) -> None:
     width, height = (
-        FINAL_DIMS[aspect_ratio]
+        FINAL_DIMS[
+            aspect_ratio
+        ]
     )
 
     cmd = [
@@ -938,7 +1128,9 @@ def _exact_720p(
             "192k",
         ]
     else:
-        cmd += ["-an"]
+        cmd += [
+            "-an"
+        ]
 
     cmd.append(
         str(target)
@@ -947,8 +1139,12 @@ def _exact_720p(
     subprocess.run(
         cmd,
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=(
+            subprocess.DEVNULL
+        ),
+        stderr=(
+            subprocess.DEVNULL
+        ),
     )
 
 
@@ -969,8 +1165,12 @@ def _extract_last_frame(
             str(target),
         ],
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=(
+            subprocess.DEVNULL
+        ),
+        stderr=(
+            subprocess.DEVNULL
+        ),
     )
 
 
@@ -986,8 +1186,10 @@ def _concat_segments(
         )
         return
 
-    manifest = target.with_suffix(
-        ".txt"
+    manifest = (
+        target.with_suffix(
+            ".txt"
+        )
     )
 
     manifest.write_text(
@@ -996,7 +1198,8 @@ def _concat_segments(
                 f"file "
                 f"'{path.as_posix()}'"
             )
-            for path in segments
+            for path
+            in segments
         ),
         encoding="utf-8",
     )
@@ -1030,7 +1233,9 @@ def _concat_segments(
             "192k",
         ]
     else:
-        cmd += ["-an"]
+        cmd += [
+            "-an"
+        ]
 
     cmd.append(
         str(target)
@@ -1039,8 +1244,12 @@ def _concat_segments(
     subprocess.run(
         cmd,
         check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=(
+            subprocess.DEVNULL
+        ),
+        stderr=(
+            subprocess.DEVNULL
+        ),
     )
 
     manifest.unlink(
@@ -1119,6 +1328,7 @@ def _prune_local_results(
                 path.unlink(
                     missing_ok=True
                 )
+
         except OSError:
             pass
 
@@ -1133,7 +1343,8 @@ def _prune_local_results(
     scaledown_window=75,
     max_containers=1,
     volumes={
-        RESULT_DIR: result_volume,
+        RESULT_DIR:
+        result_volume
     },
 )
 @modal.concurrent(
@@ -1159,7 +1370,9 @@ class LTXWorker:
                     "8188",
                     "--disable-auto-launch",
                 ],
-                cwd=str(COMFY_DIR),
+                cwd=str(
+                    COMFY_DIR
+                ),
                 stdout=(
                     subprocess.DEVNULL
                 ),
@@ -1229,7 +1442,8 @@ class LTXWorker:
 
         if not prompt.strip():
             raise ValueError(
-                "Prompt cannot be empty"
+                "Prompt cannot "
+                "be empty"
             )
 
         _prune_local_results()
@@ -1285,8 +1499,10 @@ class LTXWorker:
 
             suffix = (
                 normalized_suffix
-                if normalized_suffix
-                in allowed
+                if (
+                    normalized_suffix
+                    in allowed
+                )
                 else ".png"
             )
 
@@ -1325,9 +1541,9 @@ class LTXWorker:
                     duration % 10
                 )
 
-        final_segments: list[
-            Path
-        ] = []
+        final_segments: (
+            list[Path]
+        ) = []
 
         current_source = (
             source_image
@@ -1335,7 +1551,9 @@ class LTXWorker:
 
         first_mode = mode
 
-        started = time.time()
+        started = (
+            time.time()
+        )
 
         for (
             index,
@@ -1356,17 +1574,18 @@ class LTXWorker:
                 segment_prompt = (
                     "Continue seamlessly "
                     "from the supplied "
-                    "first frame. Preserve "
-                    "the exact subject "
-                    "identity, wardrobe, "
-                    "environment, lighting, "
-                    "lens character, camera "
+                    "first frame. "
+                    "Preserve the exact "
+                    "subject identity, "
+                    "wardrobe, environment, "
+                    "lighting, lens "
+                    "character, camera "
                     "direction, motion "
                     "momentum, and visual "
                     "style from the previous "
                     "shot. Do not restart "
-                    "the scene. Continue the "
-                    "action naturally. "
+                    "the scene. Continue "
+                    "the action naturally. "
                     + base_prompt
                 )
 
@@ -1392,7 +1611,9 @@ class LTXWorker:
 
             workflow = (
                 _prepare_workflow(
-                    mode=segment_mode,
+                    mode=(
+                        segment_mode
+                    ),
                     prompt=(
                         segment_prompt
                     ),
@@ -1427,15 +1648,17 @@ class LTXWorker:
                 timeout_seconds=900,
             )
 
-            raw = _newest_video(
-                generation_started,
-                prefix_token,
+            raw = (
+                _newest_video(
+                    generation_started,
+                    prefix_token,
+                )
             )
 
             exact = (
                 work
                 / (
-                    f"segment_"
+                    "segment_"
                     f"{index:02d}.mp4"
                 )
             )
@@ -1454,7 +1677,9 @@ class LTXWorker:
             if (
                 index
                 < (
-                    len(segment_lengths)
+                    len(
+                        segment_lengths
+                    )
                     - 1
                 )
             ):
@@ -1506,31 +1731,29 @@ class LTXWorker:
 
         result_volume.commit()
 
-        elapsed = round(
-            time.time() - started,
-            1,
-        )
-
         return {
-            "status": "completed",
-            "job_id": job_id,
-            "filename": (
-                final_path.name
+            "status":
+            "completed",
+            "job_id":
+            job_id,
+            "filename":
+            final_path.name,
+            "duration":
+            stats["duration"],
+            "size_bytes":
+            stats["size_bytes"],
+            "elapsed_seconds":
+            round(
+                time.time()
+                - started,
+                1,
             ),
-            "duration": (
-                stats["duration"]
-            ),
-            "size_bytes": (
-                stats["size_bytes"]
-            ),
-            "elapsed_seconds": (
-                elapsed
-            ),
-            "segments": len(
-                final_segments
-            ),
-            "seed": seed,
-            "resolution": (
+            "segments":
+            len(final_segments),
+            "seed":
+            seed,
+            "resolution":
+            (
                 "1280x720"
                 if (
                     aspect_ratio
@@ -1538,37 +1761,16 @@ class LTXWorker:
                 )
                 else "720x1280"
             ),
-            "fps": 24,
-            "audio": (
-                generate_audio
-            ),
+            "fps":
+            24,
+            "audio":
+            generate_audio,
         }
-
-
-# -------------------------
-# Web / API layer
-# -------------------------
-
-from fastapi import (
-    FastAPI,
-    File,
-    Form,
-    HTTPException,
-    UploadFile,
-)
-
-from fastapi.responses import (
-    FileResponse,
-)
-
-from fastapi.staticfiles import (
-    StaticFiles,
-)
 
 
 web = FastAPI(
     title="LTX Motion Studio",
-    version="2.1.0",
+    version="2.2.0",
 )
 
 
@@ -1609,13 +1811,16 @@ def config() -> dict[
             "native_segment_"
             "max_seconds"
         ): 10,
-        "resolution": "720p",
-        "fps": 24,
+        "resolution":
+        "720p",
+        "fps":
+        24,
         "aspects": [
             "16:9",
             "9:16",
         ],
-        "camera_motions": list(
+        "camera_motions":
+        list(
             CAMERA_PROMPTS.keys()
         ),
         (
@@ -1626,9 +1831,8 @@ def config() -> dict[
             "gross_usage_"
             "cap_usd"
         ): 32,
-        "gpu_hourly_usd": (
-            1.9512
-        ),
+        "gpu_hourly_usd":
+        1.9512,
         (
             "estimated_seconds_"
             "per_10s_clip"
@@ -1781,16 +1985,18 @@ async def generate(
     )
 
     return {
-        "status": "accepted",
-        "call_id": (
-            call.object_id
-        ),
-        "job_id": job_id,
-        "seed": resolved_seed,
-        "segments": segments,
-        "estimated_seconds": (
-            segments * 360
-        ),
+        "status":
+        "accepted",
+        "call_id":
+        call.object_id,
+        "job_id":
+        job_id,
+        "seed":
+        resolved_seed,
+        "segments":
+        segments,
+        "estimated_seconds":
+        segments * 360,
     }
 
 
@@ -1802,7 +2008,9 @@ def job_status(
 ) -> Any:
     fc = (
         modal.FunctionCall
-        .from_id(call_id)
+        .from_id(
+            call_id
+        )
     )
 
     try:
@@ -1817,7 +2025,8 @@ def job_status(
 
         return JSONResponse(
             {
-                "status": "running",
+                "status":
+                "running",
             },
             status_code=202,
         )
@@ -1841,7 +2050,9 @@ def cancel_job(
 ) -> dict[str, str]:
     fc = (
         modal.FunctionCall
-        .from_id(call_id)
+        .from_id(
+            call_id
+        )
     )
 
     fc.cancel(
@@ -1849,7 +2060,8 @@ def cancel_job(
     )
 
     return {
-        "status": "cancelled",
+        "status":
+        "cancelled",
     }
 
 
@@ -1924,7 +2136,8 @@ def delete_result(
     result_volume.commit()
 
     return {
-        "status": "deleted",
+        "status":
+        "deleted",
     }
 
 
@@ -1942,7 +2155,8 @@ web.mount(
 @app.function(
     image=web_image,
     volumes={
-        RESULT_DIR: result_volume,
+        RESULT_DIR:
+        result_volume
     },
     timeout=300,
 )
