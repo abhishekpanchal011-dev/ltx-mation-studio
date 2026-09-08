@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import logging
 import os
 import random
 import shutil
@@ -61,6 +62,9 @@ MAX_PROMPT_CHARS = 12000
 TRANSFER_LIMIT_BYTES = 95 * 1024 * 1024
 TRANSFER_TARGET_BYTES = 90 * 1024 * 1024
 FRAME_RATE = 24
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 CAMERA_PROMPTS = {
     "auto": "",
@@ -659,18 +663,57 @@ def _find_generated_video(
 
 
 def _run_ffmpeg(cmd: list[str], context: str) -> None:
+    # Keep routine FFmpeg banners and embedded media metadata (which may include
+    # the user's prompt) out of Modal logs and API error responses.
+    effective_cmd = cmd
+    if cmd and Path(cmd[0]).name == "ffmpeg":
+        effective_cmd = [cmd[0], "-hide_banner", "-loglevel", "error", *cmd[1:]]
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        subprocess.run(effective_cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         detail = exc.stderr or exc.stdout or str(exc)
         raise RuntimeError(f"{context} failed: {_clip_text(detail, 5000)}") from None
 
 
+def _video_dimensions(path: Path) -> tuple[int, int]:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=width,height", "-of", "json", str(path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        streams = json.loads(result.stdout).get("streams", [])
+        if not streams:
+            raise ValueError("no video stream")
+        return int(streams[0]["width"]), int(streams[0]["height"])
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not inspect generated video dimensions: {type(exc).__name__}: {exc}"
+        ) from None
+
+
 def _exact_720p(source: Path, target: Path, aspect_ratio: str, audio: bool) -> None:
     width, height = FINAL_DIMS[aspect_ratio]
+    source_width, source_height = _video_dimensions(source)
+    logger.info(
+        "video_normalization source=%s source_dimensions=%sx%s target_dimensions=%sx%s",
+        source.name,
+        source_width,
+        source_height,
+        width,
+        height,
+    )
     cmd = [
         "ffmpeg", "-y", "-i", str(source),
-        "-vf", f"crop={width}:{height}",
+        "-vf",
+        (
+            f"scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},setsar=1"
+        ),
         "-c:v", "libx264", "-preset", "medium", "-crf", "18",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart",
     ]
@@ -851,9 +894,15 @@ class LTXWorker:
                 prompt_enhance=prompt_enhance,
                 generate_audio=generate_audio,
             )
-        except (RuntimeError, ValueError, TimeoutError):
+        except (RuntimeError, ValueError, TimeoutError) as exc:
+            logger.exception(
+                "job_failed job_id=%s error_type=%s", job_id, type(exc).__name__
+            )
             raise
         except Exception as exc:
+            logger.exception(
+                "job_failed job_id=%s error_type=%s", job_id, type(exc).__name__
+            )
             raise RuntimeError(
                 f"Unexpected worker error: {type(exc).__name__}: {_clip_text(exc, 4000)}"
             ) from None
@@ -902,6 +951,15 @@ class LTXWorker:
         source_image: Path | None = None
         started = time.time()
 
+        logger.info(
+            "job_started job_id=%s mode=%s duration=%s aspect_ratio=%s audio=%s",
+            job_id,
+            mode,
+            duration,
+            aspect_ratio,
+            generate_audio,
+        )
+
         try:
             base_prompt = prompt.strip()
             camera = CAMERA_PROMPTS[camera_motion]
@@ -928,8 +986,17 @@ class LTXWorker:
             current_source = source_image
 
             for index, segment_duration in enumerate(segment_lengths):
+                segment_started = time.time()
                 segment_mode: Literal["image", "text"] = (
                     mode if index == 0 else "image"
+                )
+                logger.info(
+                    "segment_started job_id=%s segment=%s/%s mode=%s duration=%s",
+                    job_id,
+                    index + 1,
+                    len(segment_lengths),
+                    segment_mode,
+                    segment_duration,
                 )
                 if index > 0:
                     segment_prompt = (
@@ -961,7 +1028,7 @@ class LTXWorker:
                 )
 
                 generation_started = time.time()
-                _, history_item = _convert_and_execute(
+                prompt_id, history_item = _convert_and_execute(
                     workflow,
                     proc=self.proc,
                     timeout_seconds=1200,
@@ -971,6 +1038,14 @@ class LTXWorker:
                 exact = work / f"segment_{index:02d}.mp4"
                 _exact_720p(raw, exact, aspect_ratio, generate_audio)
                 final_segments.append(exact)
+                logger.info(
+                    "segment_completed job_id=%s segment=%s/%s prompt_id=%s elapsed_seconds=%.1f",
+                    job_id,
+                    index + 1,
+                    len(segment_lengths),
+                    prompt_id,
+                    time.time() - segment_started,
+                )
 
                 if index < len(segment_lengths) - 1:
                     next_frame = (
@@ -986,6 +1061,14 @@ class LTXWorker:
             _concat_segments(final_segments, final_path, generate_audio)
             stats = _fit_transfer_guard(final_path, generate_audio)
             result_volume.commit()
+
+            logger.info(
+                "job_completed job_id=%s segments=%s elapsed_seconds=%.1f size_bytes=%s",
+                job_id,
+                len(final_segments),
+                time.time() - started,
+                stats["size_bytes"],
+            )
 
             return {
                 "status": "completed",
@@ -1113,7 +1196,7 @@ async def generate(
         resolved_seed = 1
 
     job_id = uuid.uuid4().hex
-    call = LTXWorker().generate.spawn(
+    call = await LTXWorker().generate.spawn.aio(
         job_id=job_id,
         mode=mode,
         prompt=prompt,
@@ -1210,4 +1293,3 @@ web.mount(
 @modal.asgi_app()
 def frontend() -> FastAPI:
     return web
-

@@ -149,7 +149,7 @@ async function generate() {
     const r = await fetch('/api/generate', { method: 'POST', body: data }); const body = await r.json();
     if (!r.ok) throw new Error(body.detail || 'Unable to start generation');
     state.callId = body.call_id; state.jobId = body.job_id; state.estimateSeconds = body.estimated_seconds || state.estimateSeconds;
-    persistActiveJob(); await pollJob(); if (!state.polling && state.callId) state.polling = setInterval(pollJob, 4000);
+    persistActiveJob(); await pollJob(); if (!state.polling && state.callId) state.polling = setInterval(pollJob, 8000);
   } catch (err) { hideProgressWithError(err.message || 'Generation could not be started.'); }
 }
 
@@ -197,7 +197,7 @@ function restoreActiveJob() {
     const saved = JSON.parse(localStorage.getItem(ACTIVE_JOB_KEY) || 'null'); if (!saved?.callId) return false;
     state.callId=saved.callId; state.jobId=saved.jobId; state.jobStartedAt=saved.startedAt || Date.now();
     state.estimateSeconds=saved.estimateSeconds || 360; if (saved.duration) setDuration(saved.duration); if (saved.aspect) setAspect(saved.aspect);
-    showProgress(); pollJob(); state.polling=setInterval(pollJob,4000); return true;
+    showProgress(); pollJob(); state.polling=setInterval(pollJob,8000); return true;
   } catch { localStorage.removeItem(ACTIVE_JOB_KEY); return false; }
 }
 
